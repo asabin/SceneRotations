@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Scene Rotations — Head-Tracked Binaural Demo</title>
+    <script type="module" crossorigin src="./assets/index-BV7qfkZo.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-CjV2lZa3.css">
+  </head>
+  <body>
+    <canvas id="stage"></canvas>
+
+    <div id="hud">initializing…</div>
+
+    <canvas id="minimap" width="360" height="360"></canvas>
+
+    <div id="controls" hidden>
+      <button id="playpause-btn" title="Space also toggles">&#9654;</button>
+      <select id="scene-switch" title="Switch scene"></select>
+    </div>
+
+    <div id="start-overlay">
+      <div id="start-card">
+        <h1>Scene Rotations</h1>
+        <p>360 head-tracked binaural playback demo.<br />Headphones required.</p>
+        <label>
+          Scene
+          <select id="scene-select"></select>
+        </label>
+        <button id="start-btn">&#9654; Start</button>
+        <small>Drag to look around · arrow keys also work</small>
+      </div>
+    </div>
+
+    <footer id="attribution">
+      Acoustic backgrounds derived from the ARTE database (Weisser et al., 2019), CC-BY 4.0.
+    </footer>
+
+  </body>
+</html>
