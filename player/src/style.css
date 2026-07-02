@@ -1,0 +1,169 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: #000;
+  overflow: hidden;
+  font: 13px/1.5 ui-monospace, Menlo, monospace;
+  color: #9fe;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  touch-action: none;
+  cursor: grab;
+}
+#stage:active {
+  cursor: grabbing;
+}
+
+#hud {
+  position: fixed;
+  left: 12px;
+  top: 12px;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 8px 12px;
+  border-radius: 6px;
+  pointer-events: none;
+  white-space: pre;
+  z-index: 5;
+}
+
+#minimap {
+  position: fixed;
+  right: 12px;
+  top: 12px;
+  width: 180px;
+  height: 180px;
+  z-index: 5;
+  pointer-events: none;
+}
+
+#controls {
+  position: fixed;
+  left: 50%;
+  bottom: 34px;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+#controls[hidden] {
+  display: none;
+}
+#controls select {
+  background: rgba(10, 36, 54, 0.85);
+  color: #9fe;
+  border: 1px solid #2af;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+#controls select:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+#controls button {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 1px solid #2af;
+  background: rgba(10, 36, 54, 0.85);
+  color: #9fe;
+  font-size: 18px;
+  cursor: pointer;
+}
+#controls button:hover {
+  background: rgba(16, 55, 80, 0.9);
+}
+#controls button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+#start-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  background: rgba(0, 0, 0, 0.85);
+}
+
+#start-card {
+  border: 1px solid #2af;
+  padding: 26px 34px;
+  border-radius: 10px;
+  text-align: center;
+  background: rgba(6, 14, 22, 0.9);
+}
+#start-card h1 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+#start-card p {
+  margin: 0 0 16px;
+  color: #6ad;
+}
+#start-card label {
+  display: block;
+  margin-bottom: 16px;
+  color: #6ad;
+  font-size: 12px;
+}
+#start-card select {
+  display: block;
+  margin: 6px auto 0;
+  background: #061019;
+  color: #9fe;
+  border: 1px solid #2af;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font: inherit;
+}
+#start-card button {
+  display: block;
+  margin: 0 auto 10px;
+  padding: 10px 28px;
+  font: inherit;
+  font-size: 15px;
+  color: #9fe;
+  background: #0a2436;
+  border: 1px solid #2af;
+  border-radius: 6px;
+  cursor: pointer;
+}
+#start-card button:hover {
+  background: #103750;
+}
+#start-card button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+#start-card small {
+  color: #48a;
+  font-size: 11px;
+}
+#start-card .error {
+  color: #fb6;
+  margin-top: 10px;
+  display: block;
+}
+
+#attribution {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 8px;
+  text-align: center;
+  font-size: 11px;
+  color: #567;
+  pointer-events: none;
+  z-index: 4;
+}

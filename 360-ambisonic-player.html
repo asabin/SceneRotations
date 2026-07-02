@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>360 Video + Ambisonic Audio (yaw-locked)</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;font:13px/1.4 ui-monospace,Menlo,monospace;color:#9fe}
+  #stage{position:fixed;inset:0;touch-action:none;cursor:grab}
+  #stage:active{cursor:grabbing}
+  #hud{position:fixed;left:10px;top:10px;background:rgba(0,0,0,.55);padding:8px 10px;border-radius:6px;
+       pointer-events:none;white-space:pre;z-index:5}
+  #start{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:10;
+         background:rgba(0,0,0,.85);cursor:pointer}
+  #start div{border:1px solid #2af;padding:18px 26px;border-radius:8px;font-size:15px;text-align:center}
+  #start small{display:block;color:#6ad;margin-top:6px;font-size:11px}
+  .warn{color:#fb6}
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div id="hud">initializing…</div>
+<div id="start"><div>▶ Start<br><small>headphones required · click to enable audio</small></div></div>
+
+<!-- Three.js (UMD global THREE) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<!-- Omnitone (UMD global Omnitone). gstatic fallback: https://www.gstatic.com/external_hosted/omnitone/build/omnitone.min.js -->
+<script src="https://unpkg.com/omnitone/build/omnitone.min.js"></script>
+
+<script>
+/* ============================ CONFIG ============================ */
+const CFG = {
+  VIDEO_SRC:  'scene.mp4',        // equirectangular 2:1 360 video
+  AUDIO_SRC:  'scene_foa.wav',    // SEPARATE multichannel ambisonic WAV (AmbiX / ACN-SN3D)
+  ORDER:      1,                  // 1 = FOA(4ch), 2 = SOA(9ch), 3 = TOA(16ch)
+  LOOP:       true,
+  // If your file is NOT AmbiX channel order, remap here. AmbiX FOA = [0,1,2,3] = W,Y,Z,X.
+  // (FuMa needs a real conversion upstream — W is scaled — not just a remap.)
+  CHANNEL_MAP: null,              // e.g. [0,3,1,2]; null = identity
+  MIRROR_YAW: false,             // flip to true if turning right makes sound go left
+  RESYNC_THRESHOLD: 0.08,         // seconds of A/V drift before we re-cue the audio buffer
+  DRAG_SENSITIVITY: 0.12,         // deg of yaw per px dragged
+  FOV: 75
+};
+/* =============================================================== */
+
+const hud = document.getElementById('hud');
+const log = (o)=>{ hud.textContent = Object.entries(o).map(([k,v])=>k.padEnd(7)+': '+v).join('\n'); };
+
+/* ---------- Three.js: equirectangular videosphere, camera at origin ---------- */
+const canvas = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(CFG.FOV, innerWidth/innerHeight, 0.1, 100);
+
+const video = document.createElement('video');
+video.src = CFG.VIDEO_SRC; video.crossOrigin='anonymous';
+video.loop = CFG.LOOP; video.muted = true;          // muted: audio comes from the ambisonic buffer
+video.playsInline = true; video.setAttribute('playsinline','');
+const tex = new THREE.VideoTexture(video);
+
+const geo = new THREE.SphereGeometry(50, 64, 40);
+geo.scale(-1, 1, 1);                                 // invert so we view from inside, texture un-mirrored
+const sphere = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({map:tex}));
+scene.add(sphere);
+
+function resize(){ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); }
+addEventListener('resize', resize); resize();
+
+/* ---------- yaw-only pointer drag (latitude pinned to horizon) ---------- */
+let lon = 0;                       // degrees; lat fixed at 0 -> stable body, horizontal rotation only
+let dragging=false, px=0;
+canvas.addEventListener('pointerdown', e=>{ dragging=true; px=e.clientX; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener('pointermove', e=>{ if(!dragging) return; lon -= (e.clientX-px)*CFG.DRAG_SENSITIVITY; px=e.clientX; });
+canvas.addEventListener('pointerup',   ()=>dragging=false);
+canvas.addEventListener('pointercancel',()=>dragging=false);
+
+function aimCamera(){
+  const phi = Math.PI/2;                                  // 90° -> horizon (lat = 0)
+  const theta = THREE.MathUtils.degToRad(lon);
+  camera.lookAt(Math.sin(phi)*Math.cos(theta), Math.cos(phi), Math.sin(phi)*Math.sin(theta));
+}
+
+/* ---------- Web Audio + Omnitone: ambisonic decode, binaural, rotation ---------- */
+const ctx = new (window.AudioContext||window.webkitAudioContext)();
+let renderer3D=null, audioBuffer=null, src=null;
+let audioCtxStart=0, audioOffset=0, audioReady=false;
+
+async function loadAudio(){
+  const buf = await fetch(CFG.AUDIO_SRC).then(r=>r.arrayBuffer());
+  audioBuffer = await ctx.decodeAudioData(buf);          // multichannel buffer (4/9/16 ch)
+  renderer3D = (CFG.ORDER===1)
+    ? Omnitone.createFOARenderer(ctx, CFG.CHANNEL_MAP ? {channelMap:CFG.CHANNEL_MAP} : {})
+    : Omnitone.createHOARenderer(ctx, {ambisonicOrder:CFG.ORDER});
+  await renderer3D.initialize();
+  renderer3D.output.connect(ctx.destination);
+  audioReady = true;
+}
+
+function startAudio(offset=0){
+  if(src){ try{src.stop();}catch(e){} }
+  src = ctx.createBufferSource();
+  src.buffer = audioBuffer;
+  src.loop = CFG.LOOP;
+  src.connect(renderer3D.input);
+  src.start(0, offset % audioBuffer.duration);
+  audioCtxStart = ctx.currentTime; audioOffset = offset;
+}
+
+/* keep the buffer aligned to the video's clock (video = master) */
+function syncCheck(){
+  if(!audioReady || video.paused) return;
+  const est = audioOffset + (ctx.currentTime - audioCtxStart);     // where the buffer "thinks" it is
+  const want = video.currentTime;
+  const drift = want - (CFG.LOOP ? est % audioBuffer.duration : est);
+  if(Math.abs(drift) > CFG.RESYNC_THRESHOLD) startAudio(want);
+  return drift;
+}
+
+/* ---------- main loop ---------- */
+let lastDrift=0;
+function frame(){
+  requestAnimationFrame(frame);
+  aimCamera();
+  camera.updateMatrixWorld();
+  if(renderer3D){
+    const m = camera.matrixWorld.elements.slice();
+    if(CFG.MIRROR_YAW){ m[0]*=-1; m[8]*=-1; }            // mirror about the yaw axis if needed
+    renderer3D.setRotationMatrix4(m);
+  }
+  if(performance.now()%200 < 17) lastDrift = syncCheck() ?? lastDrift;
+  renderer.render(scene, camera);
+  log({state: video.paused?'paused':'playing', yaw:(((lon%360)+360)%360).toFixed(1)+'°',
+       order:CFG.ORDER, drift:(lastDrift*1000).toFixed(0)+' ms', audio:audioReady?'ok':'loading'});
+}
+frame();
+
+/* ---------- gesture-gated start (autoplay + decode) ---------- */
+document.getElementById('start').addEventListener('click', async function(){
+  this.textContent='loading…'; this.style.pointerEvents='none';
+  try{
+    await ctx.resume();
+    await loadAudio();
+    await video.play();
+    startAudio(video.currentTime);
+    this.remove();
+  }catch(err){
+    this.innerHTML = '<div class="warn">load failed — check console / asset paths</div>';
+    console.error(err);
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+.DS_Store
+
+# Audio assets stay out of the source branch (deployed via gh-pages build)
+FoodCourt 1/
+Living Room/
+
+player/node_modules/
+player/dist/
