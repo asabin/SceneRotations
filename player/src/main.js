@@ -29,8 +29,8 @@ const SCENES = {
 // Flip if turning right makes the sound go left (set from Stage 1 listening test).
 const MIRROR_YAW = false;
 
-const DRAG_SENSITIVITY = 0.12; // deg of yaw per px dragged
-const ARROW_SPEED = 60; // deg/s while an arrow key is held
+const DRAG_SENSITIVITY = 0.25; // deg of yaw per px dragged
+const ARROW_SPEED = 120; // deg/s while an arrow key is held
 const FOV = 75;
 const RESYNC_THRESHOLD = 0.08; // s of A/V drift before hard re-cue (Stage 3)
 
