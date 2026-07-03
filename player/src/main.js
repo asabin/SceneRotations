@@ -52,7 +52,11 @@ function setupYawControls(canvas) {
   });
   canvas.addEventListener('pointermove', (e) => {
     if (!dragging) return;
-    yaw += (e.clientX - lastX) * DRAG_SENSITIVITY;
+    const delta = (e.clientX - lastX) * DRAG_SENSITIVITY;
+    yaw += delta;
+    // While IMU control is active, dragging re-aims by shifting the offset,
+    // so the tweak survives the next orientation event.
+    if (motion.active) motion.offset += delta;
     lastX = e.clientX;
   });
   canvas.addEventListener('pointerup', () => (dragging = false));
@@ -73,6 +77,72 @@ function setupYawControls(canvas) {
     if (held.ArrowLeft) yaw -= ARROW_SPEED * dt;
     if (held.ArrowRight) yaw += ARROW_SPEED * dt;
   };
+}
+
+/* ------------------ device-motion (IMU) yaw ------------------- */
+// Opt-in on mobile: the W3C deviceorientation angles are converted to a
+// camera quaternion (same math as three.js DeviceOrientationControls) and
+// the world-yaw of the look direction drives the shared `yaw` variable.
+// An offset captured at enable time keeps the view from jumping.
+
+const motion = {
+  supported: typeof DeviceOrientationEvent !== 'undefined',
+  active: false,
+  offset: 0, // deg; yaw = deviceYaw + offset
+  needsCalibration: false,
+};
+
+const _euler = new THREE.Euler();
+const _q = new THREE.Quaternion();
+const _qFlip = new THREE.Quaternion(-Math.SQRT1_2, 0, 0, Math.SQRT1_2); // -90 deg about X
+const _qScreen = new THREE.Quaternion();
+const _zAxis = new THREE.Vector3(0, 0, 1);
+const _look = new THREE.Vector3();
+
+function onDeviceOrientation(e) {
+  if (e.alpha == null || e.beta == null || e.gamma == null) return;
+  const screenAngle = screen.orientation?.angle ?? window.orientation ?? 0;
+
+  _euler.set(
+    THREE.MathUtils.degToRad(e.beta),
+    THREE.MathUtils.degToRad(e.alpha),
+    -THREE.MathUtils.degToRad(e.gamma),
+    'YXZ'
+  );
+  _q.setFromEuler(_euler)
+    .multiply(_qFlip)
+    .multiply(_qScreen.setFromAxisAngle(_zAxis, -THREE.MathUtils.degToRad(screenAngle)));
+
+  // Yaw of the device's look direction in our world convention
+  // (0 = -Z ahead, increasing to the right).
+  _look.set(0, 0, -1).applyQuaternion(_q);
+  const deviceYaw = THREE.MathUtils.radToDeg(Math.atan2(_look.x, -_look.z));
+
+  if (motion.needsCalibration) {
+    motion.offset = yaw - deviceYaw;
+    motion.needsCalibration = false;
+  }
+  if (motion.active) yaw = deviceYaw + motion.offset;
+}
+
+async function setMotionControl(on) {
+  if (!on) {
+    motion.active = false;
+    removeEventListener('deviceorientation', onDeviceOrientation);
+    return false;
+  }
+  // iOS requires an explicit permission request from a user gesture.
+  if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+    try {
+      if ((await DeviceOrientationEvent.requestPermission()) !== 'granted') return false;
+    } catch {
+      return false;
+    }
+  }
+  motion.needsCalibration = true;
+  motion.active = true;
+  addEventListener('deviceorientation', onDeviceOrientation);
+  return true;
 }
 
 /* ========================= AUDIO ENGINE ========================= */
@@ -431,6 +501,26 @@ async function switchScene(key) {
 }
 
 sceneSwitch.addEventListener('change', () => switchScene(sceneSwitch.value));
+
+/* ---------------- motion control toggle ---------------- */
+
+const motionBtn = document.getElementById('motion-btn');
+
+// Offer IMU control where orientation events exist and the primary pointer
+// is coarse (phones/tablets); desktops keep drag + arrows only.
+if (motion.supported && matchMedia('(pointer: coarse)').matches) {
+  motionBtn.hidden = false;
+}
+
+motionBtn.addEventListener('click', async () => {
+  const on = await setMotionControl(!motion.active);
+  motionBtn.textContent = on ? 'Motion on' : 'Motion off';
+  motionBtn.classList.toggle('active', on);
+  if (!on && motion.supported && !motion.active) {
+    // Permission denied or sensor failure: leave the button usable for retry.
+    motionBtn.blur();
+  }
+});
 
 /* ---------------- gesture-gated start ---------------- */
 

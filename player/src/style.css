@@ -67,13 +67,9 @@ body {
   cursor: wait;
 }
 #controls button {
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
   border: 1px solid #2af;
   background: rgba(10, 36, 54, 0.85);
   color: #9fe;
-  font-size: 18px;
   cursor: pointer;
 }
 #controls button:hover {
@@ -82,6 +78,25 @@ body {
 #controls button:disabled {
   opacity: 0.5;
   cursor: wait;
+}
+#playpause-btn {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  font-size: 18px;
+}
+#motion-btn {
+  border-radius: 6px;
+  padding: 8px 12px;
+  font: inherit;
+}
+#motion-btn.active {
+  background: #2a6;
+  border-color: #3fa;
+  color: #041;
+}
+#motion-btn[hidden] {
+  display: none;
 }
 
 #start-overlay {
