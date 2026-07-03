@@ -273,9 +273,8 @@ function loadPerson(scene3d) {
   new GLTFLoader().load('models/person.glb', (gltf) => {
     const person = gltf.scene;
     person.position.copy(headingToPosition(0, 1.4));
-    // Mixamo-rigged models front along -Z: aim at the listener, then flip.
+    // Model front is +Z; lookAt aims +Z at the listener position.
     person.lookAt(0, 0, 0);
-    person.rotateY(Math.PI);
     scene3d.add(person);
 
     const idle = gltf.animations.find((a) => /idle/i.test(a.name)) ?? gltf.animations[0];
