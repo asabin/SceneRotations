@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import './style.css';
 
 /* ============================ CONFIG ============================ */
@@ -13,6 +14,8 @@ const SCENES = {
     stemDir: 'stems/foodcourt',
     stemFile: (h) => `Kemar_SceneRotation_FC1_R${h}.wav`,
     gain: 1,
+    env: 'env/foodcourt.jpg', // 360 photo backdrop (Poly Haven, CC0)
+    envYaw: 0, // deg; rotate the backdrop to choose what sits at front
     videoSrc: null, // no 360 video yet (Stage 2)
     captureOffset: 0, // video t=0 vs audio t=0; measured once video exists (Stage 3)
   },
@@ -21,6 +24,8 @@ const SCENES = {
     stemDir: 'stems/livingroom',
     stemFile: (h) => `Kemar_SceneRotation_LR_R${h}.wav`,
     gain: 1,
+    env: 'env/livingroom.jpg',
+    envYaw: 0,
     videoSrc: null,
     captureOffset: 0,
   },
@@ -229,8 +234,9 @@ function updateStemGains() {
 }
 
 /* ========================= 3D SCENE ============================ */
-// Placeholder visual until the 360 video exists: a stylized person standing
-// at heading 0 (world-anchored), floor grid, and tick markers every 45 deg.
+// Visual layer until the real 360 video exists (Stage 2): a 360 photo
+// backdrop per scene (equirect JPG on the scene background + IBL), a
+// realistic animated human at heading 0, and subtle heading markers.
 
 const EYE_HEIGHT = 1.6;
 
@@ -239,71 +245,87 @@ function headingToPosition(deg, radius, y = 0) {
   return new THREE.Vector3(Math.sin(r) * radius, y, -Math.cos(r) * radius);
 }
 
-function buildPerson() {
-  const person = new THREE.Group();
-  const skin = new THREE.MeshStandardMaterial({ color: 0xd9a066 });
-  const shirt = new THREE.MeshStandardMaterial({ color: 0x2277cc });
-  const pants = new THREE.MeshStandardMaterial({ color: 0x334455 });
+/* ---- 360 photo backdrop: doubles as image-based lighting ---- */
 
-  const legs = new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.55, 4, 12), pants);
-  legs.position.y = 0.45;
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.5, 4, 12), shirt);
-  torso.position.y = 1.05;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 24, 16), skin);
-  head.position.y = 1.52;
+const textureLoader = new THREE.TextureLoader();
+const envCache = new Map();
 
-  const armGeo = new THREE.CapsuleGeometry(0.05, 0.45, 4, 8);
-  const armL = new THREE.Mesh(armGeo, shirt);
-  armL.position.set(-0.26, 1.05, 0);
-  const armR = armL.clone();
-  armR.position.x = 0.26;
+function applyEnvironment(scene3d, sceneCfg) {
+  let tex = envCache.get(sceneCfg.env);
+  if (!tex) {
+    tex = textureLoader.load(sceneCfg.env);
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    envCache.set(sceneCfg.env, tex);
+  }
+  scene3d.background = tex;
+  scene3d.environment = tex; // lights the person to match the room
+  const rotY = THREE.MathUtils.degToRad(sceneCfg.envYaw ?? 0);
+  scene3d.backgroundRotation.set(0, rotY, 0);
+  scene3d.environmentRotation.set(0, rotY, 0);
+}
 
-  // Simple face marker so you can tell the figure faces you.
-  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.03, 12, 8), skin);
-  nose.position.set(0, 1.52, 0.13);
+/* ---- animated human at heading 0 ---- */
 
-  person.add(legs, torso, head, armL, armR, nose);
-  return person;
+let personMixer = null;
+
+function loadPerson(scene3d) {
+  new GLTFLoader().load('models/person.glb', (gltf) => {
+    const person = gltf.scene;
+    person.position.copy(headingToPosition(0, 1.4));
+    person.lookAt(0, 0, 0); // model front is +Z; aim at the listener
+    scene3d.add(person);
+
+    const idle = gltf.animations.find((a) => /idle/i.test(a.name)) ?? gltf.animations[0];
+    if (idle) {
+      personMixer = new THREE.AnimationMixer(person);
+      personMixer.clipAction(idle).play();
+    }
+
+    // Soft blob shadow grounds the figure against the photo backdrop.
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const g = c.getContext('2d');
+    const grad = g.createRadialGradient(64, 64, 8, 64, 64, 64);
+    grad.addColorStop(0, 'rgba(0,0,0,0.45)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 128, 128);
+    const shadow = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.1, 1.1),
+      new THREE.MeshBasicMaterial({
+        map: new THREE.CanvasTexture(c),
+        transparent: true,
+        depthWrite: false,
+      })
+    );
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.position.copy(person.position).setY(0.01);
+    scene3d.add(shadow);
+  });
 }
 
 function buildEnvironment(scene3d) {
-  scene3d.background = new THREE.Color(0x0a0e14);
-  scene3d.fog = new THREE.Fog(0x0a0e14, 8, 24);
+  // Gentle fill so the person is never black while the env map streams in.
+  scene3d.add(new THREE.HemisphereLight(0xffffff, 0x666677, 0.5));
 
-  scene3d.add(new THREE.HemisphereLight(0x8899bb, 0x223344, 1.1));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.2);
-  sun.position.set(3, 6, 2);
-  scene3d.add(sun);
-
-  const floor = new THREE.Mesh(
-    new THREE.CircleGeometry(20, 64),
-    new THREE.MeshStandardMaterial({ color: 0x141a22 })
-  );
-  floor.rotation.x = -Math.PI / 2;
-  scene3d.add(floor);
-
-  const grid = new THREE.GridHelper(40, 40, 0x224455, 0x152030);
-  grid.position.y = 0.002;
-  scene3d.add(grid);
-
-  // Tick marker at each of the 8 stem headings, at the 1 m lab ring radius.
+  // Slim, translucent tick at each stem heading (front one green + taller).
   for (const h of HEADINGS) {
     const isFront = h === 0;
     const post = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.02, 0.02, isFront ? 0.5 : 0.25, 8),
-      new THREE.MeshStandardMaterial({ color: isFront ? 0x33ffaa : 0x2288aa })
+      new THREE.CylinderGeometry(0.012, 0.012, isFront ? 0.4 : 0.2, 8),
+      new THREE.MeshBasicMaterial({
+        color: isFront ? 0x33ffaa : 0x66ccee,
+        transparent: true,
+        opacity: 0.4,
+      })
     );
     const pos = headingToPosition(h, 1.0);
-    post.position.set(pos.x, (isFront ? 0.5 : 0.25) / 2, pos.z);
+    post.position.set(pos.x, (isFront ? 0.4 : 0.2) / 2, pos.z);
     scene3d.add(post);
   }
 
-  // The person: straight ahead at heading 0, just beyond the ring, facing the listener.
-  const person = buildPerson();
-  const p = headingToPosition(0, 1.4);
-  person.position.copy(p);
-  person.lookAt(0, 0, 0);
-  scene3d.add(person);
+  loadPerson(scene3d);
 }
 
 /* ========================= MINIMAP ============================= */
@@ -399,6 +421,7 @@ const camera = new THREE.PerspectiveCamera(FOV, innerWidth / innerHeight, 0.05, 
 camera.position.set(0, EYE_HEIGHT, 0);
 
 buildEnvironment(scene3d);
+applyEnvironment(scene3d, SCENES['livingroom']); // default scene backdrop
 
 function resize() {
   camera.aspect = innerWidth / innerHeight;
@@ -419,6 +442,7 @@ function frame(now) {
   lastT = now;
 
   stepKeys(dt);
+  personMixer?.update(dt);
 
   const r = THREE.MathUtils.degToRad(yaw);
   camera.lookAt(
@@ -489,6 +513,7 @@ async function switchScene(key) {
   sceneSwitch.disabled = true;
   stopAudio();
   sceneKey = key;
+  applyEnvironment(scene3d, SCENES[key]);
   try {
     await loadAndStartAudio(SCENES[key]); // resumes the ctx, so also un-pauses
     paused = false;
@@ -542,6 +567,7 @@ startBtn.addEventListener('click', async () => {
   startBtn.disabled = true;
   startBtn.textContent = 'loading stems…';
   sceneKey = sceneSelect.value;
+  applyEnvironment(scene3d, SCENES[sceneKey]);
   try {
     await loadAndStartAudio(SCENES[sceneKey]);
     overlay.remove();
