@@ -269,19 +269,45 @@ function applyEnvironment(scene3d, sceneCfg) {
 
 let personMixer = null;
 
-function loadPerson(scene3d) {
-  new GLTFLoader().load('models/person.glb', (gltf) => {
-    const person = gltf.scene;
-    person.position.copy(headingToPosition(0, 1.4));
-    // Model front is +Z; lookAt aims +Z at the listener position.
-    person.lookAt(0, 0, 0);
-    scene3d.add(person);
-
-    const idle = gltf.animations.find((a) => /idle/i.test(a.name)) ?? gltf.animations[0];
-    if (idle) {
-      personMixer = new THREE.AnimationMixer(person);
-      personMixer.clipAction(idle).play();
+async function loadPerson(scene3d) {
+  // michelle.glb has no idle clip of its own; idle.glb is the Xbot idle
+  // animation (skeleton-only). Both are Mixamo rigs with identical bone
+  // names, so the rotation tracks bind directly onto Michelle.
+  const loader = new GLTFLoader();
+  let person, clip;
+  try {
+    const [personGltf, idleGltf] = await Promise.all([
+      loader.loadAsync('models/michelle.glb'),
+      loader.loadAsync('models/idle.glb'),
+    ]);
+    person = personGltf.scene;
+    const nodeNames = new Set();
+    person.traverse((o) => {
+      nodeNames.add(o.name);
+      if (o.isSkinnedMesh) o.frustumCulled = false;
+    });
+    clip = idleGltf.animations[0]?.clone();
+    if (clip) {
+      // Rotation tracks only: position tracks are scaled for the Xbot
+      // skeleton and would dislocate Michelle's hips.
+      clip.tracks = clip.tracks.filter(
+        (t) => t.name.endsWith('.quaternion') && nodeNames.has(t.name.split('.')[0])
+      );
     }
+  } catch (err) {
+    console.error('person load failed', err);
+    return;
+  }
+
+  person.position.copy(headingToPosition(0, 1.4));
+  // Model front is +Z; lookAt aims +Z at the listener position.
+  person.lookAt(0, 0, 0);
+  scene3d.add(person);
+
+  if (clip?.tracks.length) {
+    personMixer = new THREE.AnimationMixer(person);
+    personMixer.clipAction(clip).play();
+  }
 
     // Soft blob shadow grounds the figure against the photo backdrop.
     const c = document.createElement('canvas');
@@ -303,7 +329,6 @@ function loadPerson(scene3d) {
     shadow.rotation.x = -Math.PI / 2;
     shadow.position.copy(person.position).setY(0.01);
     scene3d.add(shadow);
-  });
 }
 
 function buildEnvironment(scene3d) {
