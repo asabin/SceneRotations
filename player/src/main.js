@@ -267,33 +267,20 @@ function applyEnvironment(scene3d, sceneCfg) {
 
 /* ---- animated human at heading 0 ---- */
 
-let personMixer = null;
+// Kept in her authored rest pose: cross-model animation retargeting deformed
+// the mesh (different skeleton rest poses), so instead a gentle whole-body
+// sway is applied procedurally in the frame loop. Never deforms.
+let personRoot = null;
+let personBaseYawRad = 0;
 
 async function loadPerson(scene3d) {
-  // michelle.glb has no idle clip of its own; idle.glb is the Xbot idle
-  // animation (skeleton-only). Both are Mixamo rigs with identical bone
-  // names, so the rotation tracks bind directly onto Michelle.
-  const loader = new GLTFLoader();
-  let person, clip;
+  let person;
   try {
-    const [personGltf, idleGltf] = await Promise.all([
-      loader.loadAsync('models/michelle.glb'),
-      loader.loadAsync('models/idle.glb'),
-    ]);
-    person = personGltf.scene;
-    const nodeNames = new Set();
+    const gltf = await new GLTFLoader().loadAsync('models/michelle.glb');
+    person = gltf.scene;
     person.traverse((o) => {
-      nodeNames.add(o.name);
       if (o.isSkinnedMesh) o.frustumCulled = false;
     });
-    clip = idleGltf.animations[0]?.clone();
-    if (clip) {
-      // Rotation tracks only: position tracks are scaled for the Xbot
-      // skeleton and would dislocate Michelle's hips.
-      clip.tracks = clip.tracks.filter(
-        (t) => t.name.endsWith('.quaternion') && nodeNames.has(t.name.split('.')[0])
-      );
-    }
   } catch (err) {
     console.error('person load failed', err);
     return;
@@ -303,11 +290,8 @@ async function loadPerson(scene3d) {
   // Model front is +Z; lookAt aims +Z at the listener position.
   person.lookAt(0, 0, 0);
   scene3d.add(person);
-
-  if (clip?.tracks.length) {
-    personMixer = new THREE.AnimationMixer(person);
-    personMixer.clipAction(clip).play();
-  }
+  personRoot = person;
+  personBaseYawRad = person.rotation.y;
 
     // Soft blob shadow grounds the figure against the photo backdrop.
     const c = document.createElement('canvas');
@@ -468,7 +452,14 @@ function frame(now) {
   lastT = now;
 
   stepKeys(dt);
-  personMixer?.update(dt);
+
+  // Subtle idle life for the person: slow breathing bob + faint sway.
+  if (personRoot) {
+    const t = now / 1000;
+    personRoot.position.y = 0.006 * Math.sin(t * 1.8);
+    personRoot.rotation.y = personBaseYawRad + 0.02 * Math.sin(t * 0.6);
+    personRoot.rotation.z = 0.006 * Math.sin(t * 0.45);
+  }
 
   const r = THREE.MathUtils.degToRad(yaw);
   camera.lookAt(
