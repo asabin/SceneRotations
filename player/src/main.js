@@ -267,14 +267,14 @@ function applyEnvironment(scene3d, sceneCfg) {
 
 /* ---- animated human at heading 0 ---- */
 
-// three.js RobotExpressive: friendly cartoon robot with its own authored
-// Idle clip, so no cross-rig animation transfer is needed.
+// three.js Xbot: neutral android mannequin with its own authored idle clip,
+// so no cross-rig animation transfer is needed.
 let personMixer = null;
 
 async function loadPerson(scene3d) {
   let person, animations;
   try {
-    const gltf = await new GLTFLoader().loadAsync('models/robot.glb');
+    const gltf = await new GLTFLoader().loadAsync('models/person.glb');
     person = gltf.scene;
     animations = gltf.animations;
     person.traverse((o) => {
@@ -285,14 +285,12 @@ async function loadPerson(scene3d) {
     return;
   }
 
-  // The robot is ~4.6 units tall; scale to human height.
-  person.scale.setScalar(0.37);
-  person.position.copy(headingToPosition(0, 1.5));
+  person.position.copy(headingToPosition(0, 1.4));
   // Model front is +Z; lookAt aims +Z at the listener position.
   person.lookAt(0, 0, 0);
   scene3d.add(person);
 
-  const idle = animations.find((a) => a.name === 'Idle');
+  const idle = animations.find((a) => /idle/i.test(a.name));
   if (idle) {
     personMixer = new THREE.AnimationMixer(person);
     personMixer.clipAction(idle).play();
