@@ -267,17 +267,16 @@ function applyEnvironment(scene3d, sceneCfg) {
 
 /* ---- animated human at heading 0 ---- */
 
-// Kept in her authored rest pose: cross-model animation retargeting deformed
-// the mesh (different skeleton rest poses), so instead a gentle whole-body
-// sway is applied procedurally in the frame loop. Never deforms.
-let personRoot = null;
-let personBaseYawRad = 0;
+// three.js RobotExpressive: friendly cartoon robot with its own authored
+// Idle clip, so no cross-rig animation transfer is needed.
+let personMixer = null;
 
 async function loadPerson(scene3d) {
-  let person;
+  let person, animations;
   try {
-    const gltf = await new GLTFLoader().loadAsync('models/michelle.glb');
+    const gltf = await new GLTFLoader().loadAsync('models/robot.glb');
     person = gltf.scene;
+    animations = gltf.animations;
     person.traverse((o) => {
       if (o.isSkinnedMesh) o.frustumCulled = false;
     });
@@ -286,12 +285,18 @@ async function loadPerson(scene3d) {
     return;
   }
 
-  person.position.copy(headingToPosition(0, 1.4));
+  // The robot is ~4.6 units tall; scale to human height.
+  person.scale.setScalar(0.37);
+  person.position.copy(headingToPosition(0, 1.5));
   // Model front is +Z; lookAt aims +Z at the listener position.
   person.lookAt(0, 0, 0);
   scene3d.add(person);
-  personRoot = person;
-  personBaseYawRad = person.rotation.y;
+
+  const idle = animations.find((a) => a.name === 'Idle');
+  if (idle) {
+    personMixer = new THREE.AnimationMixer(person);
+    personMixer.clipAction(idle).play();
+  }
 
     // Soft blob shadow grounds the figure against the photo backdrop.
     const c = document.createElement('canvas');
@@ -452,14 +457,7 @@ function frame(now) {
   lastT = now;
 
   stepKeys(dt);
-
-  // Subtle idle life for the person: slow breathing bob + faint sway.
-  if (personRoot) {
-    const t = now / 1000;
-    personRoot.position.y = 0.006 * Math.sin(t * 1.8);
-    personRoot.rotation.y = personBaseYawRad + 0.02 * Math.sin(t * 0.6);
-    personRoot.rotation.z = 0.006 * Math.sin(t * 0.45);
-  }
+  personMixer?.update(dt);
 
   const r = THREE.MathUtils.degToRad(yaw);
   camera.lookAt(
