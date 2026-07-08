@@ -39,6 +39,18 @@ const ARROW_SPEED = 120; // deg/s while an arrow key is held
 const FOV = 75;
 const RESYNC_THRESHOLD = 0.08; // s of A/V drift before hard re-cue (Stage 3)
 
+// -- rotation responsiveness --
+// Crossfade gain smoothing time constant (s). Perceived settle ~3x this.
+// 5 ms is enough to prevent zipper noise at 60 Hz yaw updates.
+const XFADE_TAU = 0.005;
+// Lead the audio crossfade ahead of the visual yaw by the audio pipeline's
+// own latency, using current yaw velocity to extrapolate. 'auto' derives the
+// lead from ctx.outputLatency (wired ~10-25 ms; Bluetooth can be 150 ms+).
+// Set to a number (ms) to override, or 0 to disable prediction.
+const AUDIO_LEAD_MS = 'auto';
+const YAW_RATE_SMOOTH = 0.08; // s; smoothing for the yaw-velocity estimate
+const MAX_LEAD_DEG = 25; // clamp extrapolation on fast flicks
+
 /* ========================== YAW SOURCE ========================== */
 
 // Listener yaw in degrees. 0 = facing the person at front. Increases turning right.
@@ -178,7 +190,7 @@ function stopAudio() {
 }
 
 async function loadAndStartAudio(scene) {
-  const ctx = audio.ctx ?? new AudioContext();
+  const ctx = audio.ctx ?? new AudioContext({ latencyHint: 'interactive' });
   audio.ctx = ctx;
   await ctx.resume();
 
@@ -212,12 +224,40 @@ async function loadAndStartAudio(scene) {
   audio.ready = true;
 }
 
+// Yaw velocity estimate (deg/s), exponentially smoothed, for audio lead.
+let yawRate = 0;
+let prevYawSample = 0;
+
+function trackYawRate(dt) {
+  if (dt <= 0) return;
+  const instant = (yaw - prevYawSample) / dt;
+  prevYawSample = yaw;
+  const k = 1 - Math.exp(-dt / YAW_RATE_SMOOTH);
+  yawRate += (instant - yawRate) * k;
+}
+
+function audioLeadSeconds() {
+  if (AUDIO_LEAD_MS !== 'auto') return AUDIO_LEAD_MS / 1000;
+  // What the audio pipeline is behind by: output latency + crossfade settle.
+  const out = audio.ctx?.outputLatency || audio.ctx?.baseLatency || 0;
+  return out + 3 * XFADE_TAU;
+}
+
 // Equal-power crossfade between the two headings bracketing the current yaw.
-// Returns {lo, hi, gLo, gHi} for the HUD.
+// The crossfade is computed at a velocity-extrapolated yaw so the sound field
+// arrives in sync with the (much lower-latency) visuals during fast turns.
+// Returns info for the HUD.
 function updateStemGains() {
   if (!audio.ready) return null;
 
-  const a = wrap360(MIRROR_YAW ? -yaw : yaw);
+  const leadDeg = THREE.MathUtils.clamp(
+    yawRate * audioLeadSeconds(),
+    -MAX_LEAD_DEG,
+    MAX_LEAD_DEG
+  );
+  const audioYaw = yaw + leadDeg;
+
+  const a = wrap360(MIRROR_YAW ? -audioYaw : audioYaw);
   const iLo = Math.floor(a / 45) % 8;
   const iHi = (iLo + 1) % 8;
   const d = a - iLo * 45; // 0..45 deg past the lower heading
@@ -228,9 +268,9 @@ function updateStemGains() {
   for (let i = 0; i < 8; i++) {
     const target = i === iLo ? gLo : i === iHi ? gHi : 0;
     // Short ramp avoids zipper noise on fast drags.
-    audio.gains[i].gain.setTargetAtTime(target, t, 0.015);
+    audio.gains[i].gain.setTargetAtTime(target, t, XFADE_TAU);
   }
-  return { lo: HEADINGS[iLo], hi: HEADINGS[iHi], gLo, gHi };
+  return { lo: HEADINGS[iLo], hi: HEADINGS[iHi], gLo, gHi, leadDeg };
 }
 
 /* ========================= 3D SCENE ============================ */
@@ -455,6 +495,7 @@ function frame(now) {
   lastT = now;
 
   stepKeys(dt);
+  trackYawRate(dt);
   personMixer?.update(dt);
 
   const r = THREE.MathUtils.degToRad(yaw);
@@ -480,6 +521,9 @@ function frame(now) {
     lines.stems =
       `${String(xf.lo).padStart(3, '0')}:${xf.gLo.toFixed(2)}  ` +
       `${String(xf.hi).padStart(3, '0')}:${xf.gHi.toFixed(2)}`;
+    const outMs = (audio.ctx.outputLatency || audio.ctx.baseLatency || 0) * 1000;
+    lines.outlat = `${outMs.toFixed(0)} ms${outMs > 60 ? '  (Bluetooth? use wired!)' : ''}`;
+    lines.lead = `${xf.leadDeg.toFixed(1)} deg @ ${(yawRate | 0)} deg/s`;
   }
   hud.textContent = Object.entries(lines)
     .map(([k, v]) => k.padEnd(6) + ': ' + v)
