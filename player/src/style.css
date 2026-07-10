@@ -85,12 +85,14 @@ body {
   border-radius: 50%;
   font-size: 18px;
 }
-#motion-btn {
+#motion-btn,
+#eq-btn {
   border-radius: 6px;
   padding: 8px 12px;
   font: inherit;
 }
-#motion-btn.active {
+#motion-btn.active,
+#eq-btn.active {
   background: #2a6;
   border-color: #3fa;
   color: #041;

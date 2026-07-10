@@ -175,6 +175,40 @@ const audio = {
   ready: false,
 };
 
+// Headphone EQ: minimum-phase FIR correcting the Sennheiser HD 599 (SE)
+// toward the diffuse-field target the stems' DFE assumes (tools/make_hd599_eq.py).
+const eq = {
+  node: null, // ConvolverNode, created on first enable
+  enabled: false,
+  loading: null,
+};
+
+async function ensureEqNode() {
+  if (eq.node) return eq.node;
+  eq.loading ??= (async () => {
+    const res = await fetch('eq/hd599_ir.wav');
+    const buf = await audio.ctx.decodeAudioData(await res.arrayBuffer());
+    const conv = audio.ctx.createConvolver();
+    conv.normalize = false; // IR gain is calibrated; don't rescale
+    conv.buffer = buf;
+    conv.connect(audio.ctx.destination);
+    eq.node = conv;
+    return conv;
+  })();
+  return eq.loading;
+}
+
+// Route master -> destination directly, or through the EQ convolver.
+function routeMaster() {
+  if (!audio.master) return;
+  audio.master.disconnect();
+  if (eq.enabled && eq.node) {
+    audio.master.connect(eq.node);
+  } else {
+    audio.master.connect(audio.ctx.destination);
+  }
+}
+
 function stopAudio() {
   if (!audio.ready) return;
   audio.ready = false;
@@ -205,7 +239,7 @@ async function loadAndStartAudio(scene) {
 
   audio.master = ctx.createGain();
   audio.master.gain.value = scene.gain;
-  audio.master.connect(ctx.destination);
+  routeMaster();
 
   const startAt = ctx.currentTime + 0.15;
   audio.sources = [];
@@ -524,6 +558,7 @@ function frame(now) {
     const outMs = (audio.ctx.outputLatency || audio.ctx.baseLatency || 0) * 1000;
     lines.outlat = `${outMs.toFixed(0)} ms${outMs > 60 ? '  (Bluetooth? use wired!)' : ''}`;
     lines.lead = `${xf.leadDeg.toFixed(1)} deg @ ${(yawRate | 0)} deg/s`;
+    lines.eq = eq.enabled ? 'HD 599 SE diffuse-field correction' : 'off';
   }
   hud.textContent = Object.entries(lines)
     .map(([k, v]) => k.padEnd(6) + ': ' + v)
@@ -583,6 +618,29 @@ async function switchScene(key) {
 }
 
 sceneSwitch.addEventListener('change', () => switchScene(sceneSwitch.value));
+
+/* ---------------- headphone EQ toggle ---------------- */
+
+const eqBtn = document.getElementById('eq-btn');
+
+eqBtn.addEventListener('click', async () => {
+  if (!audio.ready) return;
+  if (!eq.enabled) {
+    eqBtn.disabled = true;
+    try {
+      await ensureEqNode();
+      eq.enabled = true;
+    } catch (err) {
+      console.error('EQ load failed', err);
+    }
+    eqBtn.disabled = false;
+  } else {
+    eq.enabled = false;
+  }
+  routeMaster();
+  eqBtn.textContent = eq.enabled ? 'HD\u00A0599 EQ on' : 'HD\u00A0599 EQ off';
+  eqBtn.classList.toggle('active', eq.enabled);
+});
 
 /* ---------------- motion control toggle ---------------- */
 
