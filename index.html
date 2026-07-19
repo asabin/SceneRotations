@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Scene Rotations — Head-Tracked Binaural Demo</title>
-    <script type="module" crossorigin src="./assets/index-BKOnZWl_.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-DfeLDA48.css">
+    <script type="module" crossorigin src="./assets/index-C8xeN-hD.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-CfsyvAqy.css">
   </head>
   <body>
     <canvas id="stage"></canvas>
@@ -19,6 +19,11 @@
       <select id="scene-switch" title="Switch scene"></select>
       <button id="eq-btn" title="Sennheiser HD 599 SE diffuse-field correction">HD&nbsp;599 EQ off</button>
       <button id="motion-btn" hidden title="Use device rotation to look around">Motion off</button>
+    </div>
+
+    <div id="loadbar" hidden>
+      <div id="loadbar-track"><div id="loadbar-fill"></div></div>
+      <span id="loadbar-text">loading stems…</span>
     </div>
 
     <div id="start-overlay">
