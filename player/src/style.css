@@ -173,6 +173,52 @@ body {
   display: block;
 }
 
+#loadbar {
+  position: fixed;
+  left: 50%;
+  bottom: 100px;
+  transform: translateX(-50%);
+  z-index: 20; /* above the start overlay so it shows for the initial load too */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  background: rgba(6, 14, 22, 0.9);
+  border: 1px solid #2af;
+  border-radius: 8px;
+}
+#loadbar[hidden] {
+  display: none;
+}
+#loadbar-track {
+  width: 240px;
+  height: 6px;
+  background: #0a2436;
+  border-radius: 3px;
+  overflow: hidden;
+}
+#loadbar-fill {
+  width: 0%;
+  height: 100%;
+  background: #2af;
+  border-radius: 3px;
+  transition: width 0.15s linear;
+}
+#loadbar-fill.indeterminate {
+  width: 100%;
+  animation: loadbar-pulse 1s ease-in-out infinite;
+}
+@keyframes loadbar-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+#loadbar-text {
+  font-size: 11px;
+  color: #6ad;
+}
+
 #attribution {
   position: fixed;
   left: 0;

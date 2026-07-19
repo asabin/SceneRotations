@@ -9,10 +9,12 @@ const HEADINGS = [0, 45, 90, 135, 180, 225, 270, 315];
 const SCENES = {
   // DFE stems (tools/apply_dfe.py): diffuse-field EQ'd and peak-normalized to
   // -4 dBFS per scene, so no per-scene makeup gain is needed here.
+  // Served as 16-bit FLAC (tools/make_web_stems.py): ~2.6x smaller than the
+  // 24-bit WAVs, lossless above the dithered 16-bit floor.
   foodcourt: {
     label: 'Food Court',
     stemDir: 'stems/foodcourt',
-    stemFile: (h) => `Kemar_SceneRotation_FC1_R${h}.wav`,
+    stemFile: (h) => `Kemar_SceneRotation_FC1_R${h}.flac`,
     gain: 1,
     env: 'env/foodcourt.jpg', // 360 photo backdrop (Poly Haven, CC0)
     envYaw: 0, // deg; rotate the backdrop to choose what sits at front
@@ -22,7 +24,7 @@ const SCENES = {
   livingroom: {
     label: 'Living Room',
     stemDir: 'stems/livingroom',
-    stemFile: (h) => `Kemar_SceneRotation_LR_R${h}.wav`,
+    stemFile: (h) => `Kemar_SceneRotation_LR_R${h}.flac`,
     gain: 1,
     env: 'env/livingroom.jpg',
     envYaw: 0,
@@ -223,19 +225,60 @@ function stopAudio() {
   audio.master = null;
 }
 
-async function loadAndStartAudio(scene) {
-  const ctx = audio.ctx ?? new AudioContext({ latencyHint: 'interactive' });
-  audio.ctx = ctx;
-  await ctx.resume();
+/* ---- stem download with progress ---- */
+// Streams all 8 stems in parallel, reporting aggregate bytes so the UI can
+// show a real progress bar instead of a frozen "loading…" label.
+// onProgress(loaded, total, phase): total is 0 until every Content-Length
+// header has arrived; phase is 'download' or 'decode'.
 
-  const buffers = await Promise.all(
+async function fetchStems(scene, onProgress) {
+  const state = { loaded: 0, total: 0, headers: 0 };
+  const report = () =>
+    onProgress?.(state.loaded, state.headers === HEADINGS.length ? state.total : 0, 'download');
+  report();
+
+  return Promise.all(
     HEADINGS.map(async (h) => {
       const url = `${scene.stemDir}/${encodeURIComponent(scene.stemFile(h))}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`fetch failed: ${url}`);
-      return ctx.decodeAudioData(await res.arrayBuffer());
+      state.total += Number(res.headers.get('Content-Length')) || 0;
+      state.headers++;
+
+      if (!res.body) {
+        const buf = await res.arrayBuffer();
+        state.loaded += buf.byteLength;
+        report();
+        return buf;
+      }
+      const reader = res.body.getReader();
+      const chunks = [];
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        state.loaded += value.length;
+        report();
+      }
+      const out = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+      let off = 0;
+      for (const c of chunks) {
+        out.set(c, off);
+        off += c.length;
+      }
+      return out.buffer;
     })
   );
+}
+
+async function loadAndStartAudio(scene, onProgress) {
+  const ctx = audio.ctx ?? new AudioContext({ latencyHint: 'interactive' });
+  audio.ctx = ctx;
+  await ctx.resume();
+
+  const raw = await fetchStems(scene, onProgress);
+  onProgress?.(0, 0, 'decode');
+  const buffers = await Promise.all(raw.map((buf) => ctx.decodeAudioData(buf)));
 
   audio.master = ctx.createGain();
   audio.master.gain.value = scene.gain;
@@ -598,6 +641,42 @@ addEventListener('keydown', (e) => {
   }
 });
 
+/* ---------------- stem load progress UI ---------------- */
+
+const loadbar = document.getElementById('loadbar');
+const loadbarFill = document.getElementById('loadbar-fill');
+const loadbarText = document.getElementById('loadbar-text');
+let lastBarUpdate = 0;
+
+const mb = (n) => (n / 1048576).toFixed(1);
+
+// Shared onProgress for loadAndStartAudio. Throttled: parallel streams can
+// deliver hundreds of chunks/s and the bar only needs ~20 fps.
+function stemProgressUi(loaded, total, phase) {
+  loadbar.hidden = false;
+  const now = performance.now();
+  if (phase === 'download' && now - lastBarUpdate < 50) return;
+  lastBarUpdate = now;
+
+  if (phase === 'decode') {
+    loadbarFill.classList.add('indeterminate');
+    loadbarText.textContent = 'decoding…';
+  } else if (total > 0) {
+    loadbarFill.classList.remove('indeterminate');
+    loadbarFill.style.width = `${((loaded / total) * 100).toFixed(1)}%`;
+    loadbarText.textContent = `loading stems  ${mb(loaded)} / ${mb(total)} MB`;
+  } else {
+    loadbarFill.classList.remove('indeterminate');
+    loadbarText.textContent = `loading stems  ${mb(loaded)} MB`;
+  }
+}
+
+function hideLoadProgress() {
+  loadbar.hidden = true;
+  loadbarFill.classList.remove('indeterminate');
+  loadbarFill.style.width = '0%';
+}
+
 /* ---------------- live scene switching ---------------- */
 
 async function switchScene(key) {
@@ -607,11 +686,13 @@ async function switchScene(key) {
   sceneKey = key;
   applyEnvironment(scene3d, SCENES[key]);
   try {
-    await loadAndStartAudio(SCENES[key]); // resumes the ctx, so also un-pauses
+    await loadAndStartAudio(SCENES[key], stemProgressUi); // resumes the ctx, so also un-pauses
     paused = false;
     playPauseBtn.innerHTML = '&#10074;&#10074;';
   } catch (err) {
     console.error(err);
+  } finally {
+    hideLoadProgress();
   }
   playPauseBtn.disabled = false;
   sceneSwitch.disabled = false;
@@ -684,7 +765,15 @@ startBtn.addEventListener('click', async () => {
   sceneKey = sceneSelect.value;
   applyEnvironment(scene3d, SCENES[sceneKey]);
   try {
-    await loadAndStartAudio(SCENES[sceneKey]);
+    await loadAndStartAudio(SCENES[sceneKey], (loaded, total, phase) => {
+      stemProgressUi(loaded, total, phase);
+      startBtn.textContent =
+        phase === 'decode'
+          ? 'decoding…'
+          : total > 0
+            ? `loading ${Math.round((loaded / total) * 100)}%`
+            : 'loading stems…';
+    });
     overlay.remove();
     controls.hidden = false;
     sceneSwitch.value = sceneKey;
@@ -700,5 +789,7 @@ startBtn.addEventListener('click', async () => {
       document.getElementById('start-card').append(msg);
     }
     msg.textContent = 'Load failed — check console / stem paths.';
+  } finally {
+    hideLoadProgress();
   }
 });
